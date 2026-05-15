@@ -1,0 +1,208 @@
+{
+  "name": "Resumo Diário de Notícias — Telegram",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 12,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "t1000001-0001-0001-0001-000000000001",
+      "name": "Todo dia ao meio-dia",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "t1000002-0001-0001-0001-000000000001",
+              "name": "links",
+              "value": "=[\"https://g1.globo.com\", \"https://www.infomoney.com.br\", \"https://tecnoblog.net\"]",
+              "type": "array"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "t1000002-0002-0002-0002-000000000002",
+      "name": "Lista de Links",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const links = $input.first().json.links;\nreturn links.map(link => ({\n  json: { url: link }\n}));"
+      },
+      "id": "t1000003-0003-0003-0003-000000000003",
+      "name": "Separar Links",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "t1000004-0004-0004-0004-000000000004",
+      "name": "Buscar Conteúdo da Página",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const rawHtml = item.json.data || item.json.body || item.json.content || JSON.stringify(item.json);\n  const url = $('Separar Links').item.json.url || '';\n\n  const textOnly = rawHtml\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .substring(0, 3000);\n\n  return {\n    json: {\n      url: url,\n      textContent: textOnly\n    }\n  };\n});"
+      },
+      "id": "t1000005-0005-0005-0005-000000000005",
+      "name": "Limpar HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "complete",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Você é um jornalista experiente. Analise o conteúdo de uma página de notícias e gere um resumo claro. Responda SOMENTE neste formato:\n\n*TÍTULO:* [título da principal notícia]\n*RESUMO:* [3 linhas resumindo o conteúdo]\n\nNão adicione nenhum texto fora desse formato. Use formatação Markdown compatível com Telegram."
+            },
+            {
+              "role": "user",
+              "content": "=Analise o conteúdo abaixo extraído da URL {{ $json.url }} e gere o resumo:\n\n{{ $json.textContent }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.4
+        }
+      },
+      "id": "t1000006-0006-0006-0006-000000000006",
+      "name": "ChatGPT - Resumir Notícia",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [1500, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "CREDENTIAL_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "t1000007-0001-0001-0001-000000000001",
+              "name": "url",
+              "value": "={{ $('Limpar HTML').item.json.url }}",
+              "type": "string"
+            },
+            {
+              "id": "t1000007-0002-0002-0002-000000000002",
+              "name": "resumo",
+              "value": "={{ $json.message.content }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "t1000007-0007-0007-0007-000000000007",
+      "name": "Formatar Resultado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1750, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst dataHoje = new Date().toLocaleDateString('pt-BR', {\n  weekday: 'long',\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric'\n});\n\n// Capitaliza primeira letra\nconst dataFormatada = dataHoje.charAt(0).toUpperCase() + dataHoje.slice(1);\n\nlet mensagem = `📰 *Resumo de Notícias*\\n_${dataFormatada}_\\n\\n`;\n\nitems.forEach((item, index) => {\n  const url = item.json.url || '';\n  const resumo = item.json.resumo || '';\n  const dominio = url.replace('https://','').replace('http://','').split('/')[0];\n\n  mensagem += `━━━━━━━━━━━━━━━━\\n`;\n  mensagem += `🔗 *Fonte:* [${dominio}](${url})\\n\\n`;\n  mensagem += `${resumo}\\n\\n`;\n});\n\nmensagem += `━━━━━━━━━━━━━━━━\\n`;\nmensagem += `_Gerado automaticamente pelo seu workflow n8n ⚡_`;\n\nreturn [{\n  json: {\n    mensagem_telegram: mensagem\n  }\n}];"
+      },
+      "id": "t1000008-0008-0008-0008-000000000008",
+      "name": "Montar Mensagem Telegram",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "1546115301",
+        "text": "={{ $json.mensagem_telegram }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "t1000009-0009-0009-0009-000000000009",
+      "name": "Enviar Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "CREDENTIAL_ID_TELEGRAM",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Todo dia ao meio-dia": {
+      "main": [[{ "node": "Lista de Links", "type": "main", "index": 0 }]]
+    },
+    "Lista de Links": {
+      "main": [[{ "node": "Separar Links", "type": "main", "index": 0 }]]
+    },
+    "Separar Links": {
+      "main": [[{ "node": "Buscar Conteúdo da Página", "type": "main", "index": 0 }]]
+    },
+    "Buscar Conteúdo da Página": {
+      "main": [[{ "node": "Limpar HTML", "type": "main", "index": 0 }]]
+    },
+    "Limpar HTML": {
+      "main": [[{ "node": "ChatGPT - Resumir Notícia", "type": "main", "index": 0 }]]
+    },
+    "ChatGPT - Resumir Notícia": {
+      "main": [[{ "node": "Formatar Resultado", "type": "main", "index": 0 }]]
+    },
+    "Formatar Resultado": {
+      "main": [[{ "node": "Montar Mensagem Telegram", "type": "main", "index": 0 }]]
+    },
+    "Montar Mensagem Telegram": {
+      "main": [[{ "node": "Enviar Telegram", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "1",
+  "meta": { "instanceId": "" },
+  "tags": ["telegram", "noticias", "chatgpt", "automacao"]
+}
